@@ -79,6 +79,62 @@
   tr:last-child td { border-bottom: none; }
   .empty { padding: 24px 20px; color: var(--muted); font-size: 13px; }
   .refresh-note { color: var(--muted); font-size: 12px; padding: 0 32px 20px; }
+
+  .filter-bar {
+    display: flex;
+    align-items: flex-end;
+    gap: 16px;
+    flex-wrap: wrap;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 20px;
+  }
+  .filter-group { display: flex; flex-direction: column; gap: 4px; }
+  .filter-group label { font-size: 11px; color: var(--muted); }
+  .filter-group .pair { display: flex; gap: 6px; }
+  .filter-bar input[type=date], .filter-bar input[type=time] {
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 13px;
+    font-family: inherit;
+  }
+  #apply-filter {
+    background: var(--violet);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 9px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  #apply-filter:hover { background: var(--violet-dark); }
+  .preset-btn {
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .preset-btn.active { border-color: var(--violet); color: var(--violet); }
+
+  .total-eff {
+    background: linear-gradient(135deg, var(--violet), var(--violet-dark));
+    color: #fff;
+    border-radius: 10px;
+    padding: 20px 24px;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+  .total-eff .value { font-size: 32px; font-weight: 700; }
+  .total-eff .label { font-size: 13px; opacity: 0.85; }
 </style>
 </head>
 <body>
@@ -103,8 +159,34 @@
 </div>
 
 <main id="app">
+  <div class="filter-bar">
+    <button class="preset-btn" onclick="applyPreset(9)">Last 9h</button>
+    <button class="preset-btn" onclick="applyPreset(24)">Last 24h</button>
+    <button class="preset-btn" onclick="applyPreset(48)">Last 48h</button>
+    <div class="filter-group">
+      <label>Start</label>
+      <div class="pair">
+        <input type="date" id="start-date">
+        <input type="time" id="start-time">
+      </div>
+    </div>
+    <div class="filter-group">
+      <label>End</label>
+      <div class="pair">
+        <input type="date" id="end-date">
+        <input type="time" id="end-time">
+      </div>
+    </div>
+    <button id="apply-filter" onclick="applyCustomRange()">Update filter</button>
+  </div>
+
+  <div class="total-eff">
+    <span class="value" id="total-eff-value">0</span>
+    <span class="label">Total Efficiency (QC + 360 NK + Video QC, selected range)</span>
+  </div>
+
   <div id="cards"></div>
-  <div class="refresh-note">Data refreshes automatically every 5 minutes.</div>
+  <div class="refresh-note">Data refreshes automatically every 15 minutes. Only the last 48 hours are available.</div>
 </main>
 
 <script>
@@ -119,8 +201,24 @@ const CARD_TITLES = {
   video_qc_efficiency: 'Video QC Efficiency'
 };
 
+// Which column is the row timestamp, per card (must match Code.gs DATE_COLUMNS)
+const DATE_COLUMNS = {
+  qc_efficiency: 'Hourly_Date',
+  editor_tool_image_count: 'Start_Time',
+  qc_360_nk: 'DateValue',
+  video_qc_efficiency: 'Hourly_Date'
+};
+
+// Which column feeds "Total Efficiency" — only the 3 efficiency products, not Editor Tool
+const SUM_FIELDS = {
+  qc_efficiency: 'Sum_Target',
+  qc_360_nk: 'Total_Target_Minutes',
+  video_qc_efficiency: 'Sum_Target'
+};
+
 let currentToken = null;
 let refreshTimer = null;
+let rawData = null; // full last-48h dataset from the backend, unfiltered
 
 window.onload = function () {
   google.accounts.id.initialize({
@@ -139,7 +237,7 @@ function handleCredentialResponse(response) {
   document.getElementById('user-badge').style.display = 'flex';
   loadData();
   if (refreshTimer) clearInterval(refreshTimer);
-  refreshTimer = setInterval(loadData, 5 * 60 * 1000);
+  refreshTimer = setInterval(loadData, 15 * 60 * 1000);
 }
 
 function handleSignOut() {
@@ -165,12 +263,63 @@ function loadData() {
       }
       document.getElementById('gate').style.display = 'none';
       document.getElementById('app').style.display = 'block';
-      renderCards(res.data);
+      rawData = res.data;
+      applyPreset(9); // default view: last 9 hours
     })
     .catch(function () {
       errEl.textContent = 'Could not reach the data service. Try again shortly.';
       errEl.style.display = 'block';
     });
+}
+
+function setRangeInputs(start, end) {
+  function datePart(d) { return d.toISOString().slice(0, 10); }
+  function timePart(d) { return d.toTimeString().slice(0, 5); }
+  document.getElementById('start-date').value = datePart(start);
+  document.getElementById('start-time').value = timePart(start);
+  document.getElementById('end-date').value = datePart(end);
+  document.getElementById('end-time').value = timePart(end);
+}
+
+function applyPreset(hours) {
+  const end = new Date();
+  const start = new Date(end.getTime() - hours * 60 * 60 * 1000);
+  setRangeInputs(start, end);
+  document.querySelectorAll('.preset-btn').forEach(function (b) { b.classList.remove('active'); });
+  const idx = [9, 24, 48].indexOf(hours);
+  if (idx !== -1) document.querySelectorAll('.preset-btn')[idx].classList.add('active');
+  filterAndRender(start, end);
+}
+
+function applyCustomRange() {
+  const start = new Date(document.getElementById('start-date').value + 'T' + document.getElementById('start-time').value);
+  const end = new Date(document.getElementById('end-date').value + 'T' + document.getElementById('end-time').value);
+  document.querySelectorAll('.preset-btn').forEach(function (b) { b.classList.remove('active'); });
+  filterAndRender(start, end);
+}
+
+function filterAndRender(start, end) {
+  if (!rawData) return;
+  const filtered = {};
+  Object.keys(CARD_TITLES).forEach(function (key) {
+    const rows = rawData[key] || [];
+    const dateCol = DATE_COLUMNS[key];
+    filtered[key] = rows.filter(function (r) {
+      const d = new Date(r[dateCol]);
+      return !isNaN(d) && d >= start && d <= end;
+    });
+  });
+
+  let totalEff = 0;
+  Object.keys(SUM_FIELDS).forEach(function (key) {
+    (filtered[key] || []).forEach(function (r) {
+      const v = parseFloat(r[SUM_FIELDS[key]]);
+      if (!isNaN(v)) totalEff += v;
+    });
+  });
+  document.getElementById('total-eff-value').textContent = totalEff.toFixed(2);
+
+  renderCards(filtered);
 }
 
 function renderCards(data) {
@@ -186,7 +335,7 @@ function renderCards(data) {
     if (!rows.length) {
       const empty = document.createElement('div');
       empty.className = 'empty';
-      empty.textContent = 'No data for this card yet.';
+      empty.textContent = 'No data for this card in the selected range.';
       card.appendChild(empty);
     } else {
       const table = document.createElement('table');
