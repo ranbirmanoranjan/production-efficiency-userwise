@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Production Efficiency — Userwise</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+  :root {
+    --violet: #6e1db9;
+    --violet-dark: #4f1387;
+    --ink: #1a1a1f;
+    --paper: #faf9fc;
+    --line: #e6e2ee;
+    --muted: #6b6577;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 32px;
+    border-bottom: 1px solid var(--line);
+    background: #fff;
+  }
+  header h1 {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0;
+  }
+  header .sub {
+    color: var(--muted);
+    font-size: 13px;
+    margin-top: 2px;
+  }
+  #user-badge { display: none; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
+  #user-badge img { width: 28px; height: 28px; border-radius: 50%; }
+  #signout { background: none; border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 12px; color: var(--muted); }
+
+  #gate {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 70vh;
+    gap: 16px;
+    text-align: center;
+  }
+  #gate h2 { font-size: 22px; margin: 0; }
+  #gate p { color: var(--muted); margin: 0 0 8px; max-width: 360px; }
+  #gate-error { color: #b3261e; font-size: 13px; display: none; max-width: 360px; }
+
+  main { padding: 28px 32px; display: none; }
+  .card {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    margin-bottom: 24px;
+    overflow: hidden;
+  }
+  .card h3 {
+    margin: 0;
+    padding: 16px 20px;
+    font-size: 14px;
+    font-weight: 600;
+    border-bottom: 1px solid var(--line);
+    background: #fbfaff;
+  }
+  .card h3 .accent { color: var(--violet); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 10px 20px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  tr:last-child td { border-bottom: none; }
+  .empty { padding: 24px 20px; color: var(--muted); font-size: 13px; }
+  .refresh-note { color: var(--muted); font-size: 12px; padding: 0 32px 20px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Production Efficiency — Userwise</h1>
+    <div class="sub">Your own QC, editing and video efficiency data</div>
+  </div>
+  <div id="user-badge">
+    <img id="user-avatar" src="" alt="">
+    <span id="user-email"></span>
+    <button id="signout" onclick="handleSignOut()">Sign out</button>
+  </div>
+</header>
+
+<div id="gate">
+  <h2>Sign in to view your data</h2>
+  <p>Use your Spyne Google account. Only spyne.ai and spyne.co.in emails can access this dashboard.</p>
+  <div id="g_id_signin"></div>
+  <div id="gate-error"></div>
+</div>
+
+<main id="app">
+  <div id="cards"></div>
+  <div class="refresh-note">Data refreshes automatically every 5 minutes.</div>
+</main>
+
+<script>
+// ==== CONFIG — fill these in ====
+const GOOGLE_CLIENT_ID = '269378711505-ueliguk4h0esut6n5117u1qaimp98r63.apps.googleusercontent.com';
+const GAS_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycby55DvyNMJRnDq_h8YtDt6qXTXfQRekmLVD7N64YFMRWbZynDVzuTQnmBv3LPKfBa7B/exec';
+
+const CARD_TITLES = {
+  qc_efficiency: 'QC Efficiency',
+  editor_tool_image_count: 'Editor Tool — Image Count',
+  qc_360_nk: '360 QC Efficiency (NK)',
+  video_qc_efficiency: 'Video QC Efficiency'
+};
+
+let currentToken = null;
+let refreshTimer = null;
+
+window.onload = function () {
+  google.accounts.id.initialize({
+    client_id: GOOGLE_CLIENT_ID,
+    callback: handleCredentialResponse,
+    hd: 'spyne.ai'
+  });
+  google.accounts.id.renderButton(document.getElementById('g_id_signin'), { theme: 'outline', size: 'large' });
+};
+
+function handleCredentialResponse(response) {
+  currentToken = response.credential;
+  const payload = JSON.parse(atob(response.credential.split('.')[1]));
+  document.getElementById('user-avatar').src = payload.picture || '';
+  document.getElementById('user-email').textContent = payload.email;
+  document.getElementById('user-badge').style.display = 'flex';
+  loadData();
+  if (refreshTimer) clearInterval(refreshTimer);
+  refreshTimer = setInterval(loadData, 5 * 60 * 1000);
+}
+
+function handleSignOut() {
+  currentToken = null;
+  if (refreshTimer) clearInterval(refreshTimer);
+  document.getElementById('user-badge').style.display = 'none';
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('gate').style.display = 'flex';
+}
+
+function loadData() {
+  const errEl = document.getElementById('gate-error');
+  errEl.style.display = 'none';
+  fetch(GAS_WEBAPP_URL + '?token=' + encodeURIComponent(currentToken))
+    .then(function (r) { return r.json(); })
+    .then(function (res) {
+      if (res.error) {
+        errEl.textContent = res.error;
+        errEl.style.display = 'block';
+        document.getElementById('gate').style.display = 'flex';
+        document.getElementById('app').style.display = 'none';
+        return;
+      }
+      document.getElementById('gate').style.display = 'none';
+      document.getElementById('app').style.display = 'block';
+      renderCards(res.data);
+    })
+    .catch(function () {
+      errEl.textContent = 'Could not reach the data service. Try again shortly.';
+      errEl.style.display = 'block';
+    });
+}
+
+function renderCards(data) {
+  const container = document.getElementById('cards');
+  container.innerHTML = '';
+  Object.keys(CARD_TITLES).forEach(function (key) {
+    const rows = data[key] || [];
+    const card = document.createElement('div');
+    card.className = 'card';
+    const title = document.createElement('h3');
+    title.innerHTML = CARD_TITLES[key] + ' <span class="accent">· ' + rows.length + ' rows</span>';
+    card.appendChild(title);
+    if (!rows.length) {
+      const empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = 'No data for this card yet.';
+      card.appendChild(empty);
+    } else {
+      const table = document.createElement('table');
+      const headers = Object.keys(rows[0]);
+      const thead = document.createElement('tr');
+      headers.forEach(function (h) {
+        const th = document.createElement('th');
+        th.textContent = h;
+        thead.appendChild(th);
+      });
+      table.appendChild(thead);
+      rows.forEach(function (row) {
+        const tr = document.createElement('tr');
+        headers.forEach(function (h) {
+          const td = document.createElement('td');
+          td.textContent = row[h];
+          tr.appendChild(td);
+        });
+        table.appendChild(tr);
+      });
+      card.appendChild(table);
+    }
+    container.appendChild(card);
+  });
+}
+</script>
+</body>
+</html>
