@@ -73,8 +73,13 @@
     border-bottom: 1px solid var(--line);
     background: #fbfaff;
   }
+  .card h3 { display: flex; align-items: center; justify-content: space-between; }
   .card h3 .accent { color: var(--violet); }
-  .card h3 .bucket-total { color: var(--violet-dark); font-weight: 600; }
+  .bucket-total-badge {
+    background: var(--violet); color: #fff; font-size: 13px; font-weight: 700;
+    padding: 5px 12px; border-radius: 20px; white-space: nowrap;
+  }
+  .bucket-total-badge .lbl { font-weight: 400; opacity: 0.85; margin-right: 4px; }
   .table-scroll { max-height: 398px; overflow-y: auto; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th, td { text-align: left; padding: 10px 20px; border-bottom: 1px solid var(--line); white-space: nowrap; }
@@ -368,6 +373,11 @@ function formatIST(value) {
 }
 
 function compareValues(a, b) {
+  const isoLike = /^\d{4}-\d{2}-\d{2}/;
+  if (a && b && isoLike.test(String(a)) && isoLike.test(String(b))) {
+    const da = new Date(a), db = new Date(b);
+    if (!isNaN(da) && !isNaN(db)) return da - db;
+  }
   const na = parseFloat(a), nb = parseFloat(b);
   const bothNumeric = a !== '' && b !== '' && a != null && b != null && !isNaN(na) && !isNaN(nb);
   if (bothNumeric) return na - nb;
@@ -403,9 +413,9 @@ function renderCards(data) {
         const v = parseFloat(r[sumField]);
         return acc + (isNaN(v) ? 0 : v);
       }, 0);
-      totalHtml = ' <span class="bucket-total">· total ' + total.toFixed(2) + '</span>';
+      totalHtml = '<span class="bucket-total-badge"><span class="lbl">Total</span>' + total.toFixed(2) + '</span>';
     }
-    title.innerHTML = CARD_TITLES[key] + ' <span class="accent">· ' + rows.length + ' rows</span>' + totalHtml;
+    title.innerHTML = '<span>' + CARD_TITLES[key] + ' <span class="accent">· ' + rows.length + ' rows</span></span>' + totalHtml;
     card.appendChild(title);
 
     if (!rows.length) {
