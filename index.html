@@ -74,9 +74,13 @@
     background: #fbfaff;
   }
   .card h3 .accent { color: var(--violet); }
+  .card h3 .bucket-total { color: var(--violet-dark); font-weight: 600; }
+  .table-scroll { max-height: 398px; overflow-y: auto; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th, td { text-align: left; padding: 10px 20px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; background: #fbfaff; position: sticky; top: 0; cursor: pointer; user-select: none; }
+  th:hover { color: var(--violet); }
+  th .sort-arrow { margin-left: 4px; opacity: 0.6; }
   tr:last-child td { border-bottom: none; }
   .empty { padding: 24px 20px; color: var(--muted); font-size: 13px; }
   .refresh-note { color: var(--muted); font-size: 12px; padding: 0 32px 20px; }
@@ -218,6 +222,17 @@ const SUM_FIELDS = {
   video_qc_efficiency: 'Sum_Target'
 };
 
+// Value column to total per-bucket (shown in each card's own header) — includes Editor Tool too
+const BUCKET_SUM_FIELD = {
+  qc_efficiency: 'Sum_Target',
+  editor_tool_image_count: 'Duration',
+  qc_360_nk: 'Total_Target_Minutes',
+  video_qc_efficiency: 'Sum_Target'
+};
+
+let currentFiltered = null; // last filtered dataset, kept so sorting doesn't need to re-filter
+let sortState = {}; // { cardKey: { col, dir } }
+
 let currentToken = null;
 let refreshTimer = null;
 let syncTickTimer = null;
@@ -336,31 +351,72 @@ function filterAndRender(start, end) {
   });
   document.getElementById('total-eff-value').textContent = totalEff.toFixed(2);
 
+  currentFiltered = filtered;
   renderCards(filtered);
+}
+
+function compareValues(a, b) {
+  const na = parseFloat(a), nb = parseFloat(b);
+  const bothNumeric = a !== '' && b !== '' && a != null && b != null && !isNaN(na) && !isNaN(nb);
+  if (bothNumeric) return na - nb;
+  return String(a == null ? '' : a).localeCompare(String(b == null ? '' : b));
+}
+
+function sortCard(key, col) {
+  const s = sortState[key] || { col: null, dir: 1 };
+  if (s.col === col) { s.dir = -s.dir; } else { s.col = col; s.dir = 1; }
+  sortState[key] = s;
+  renderCards(currentFiltered);
 }
 
 function renderCards(data) {
   const container = document.getElementById('cards');
   container.innerHTML = '';
   Object.keys(CARD_TITLES).forEach(function (key) {
-    const rows = data[key] || [];
+    let rows = (data[key] || []).slice();
+
+    const s = sortState[key];
+    if (s && s.col) {
+      rows.sort(function (r1, r2) { return compareValues(r1[s.col], r2[s.col]) * s.dir; });
+    }
+
     const card = document.createElement('div');
     card.className = 'card';
     const title = document.createElement('h3');
-    title.innerHTML = CARD_TITLES[key] + ' <span class="accent">· ' + rows.length + ' rows</span>';
+
+    let totalHtml = '';
+    const sumField = BUCKET_SUM_FIELD[key];
+    if (sumField && rows.length) {
+      const total = rows.reduce(function (acc, r) {
+        const v = parseFloat(r[sumField]);
+        return acc + (isNaN(v) ? 0 : v);
+      }, 0);
+      totalHtml = ' <span class="bucket-total">· total ' + total.toFixed(2) + '</span>';
+    }
+    title.innerHTML = CARD_TITLES[key] + ' <span class="accent">· ' + rows.length + ' rows</span>' + totalHtml;
     card.appendChild(title);
+
     if (!rows.length) {
       const empty = document.createElement('div');
       empty.className = 'empty';
       empty.textContent = 'No data for this card in the selected range.';
       card.appendChild(empty);
     } else {
+      const scrollWrap = document.createElement('div');
+      scrollWrap.className = 'table-scroll';
       const table = document.createElement('table');
       const headers = Object.keys(rows[0]);
       const thead = document.createElement('tr');
       headers.forEach(function (h) {
         const th = document.createElement('th');
         th.textContent = h;
+        if (s && s.col === h) {
+          const arrow = document.createElement('span');
+          arrow.className = 'sort-arrow';
+          arrow.textContent = s.dir === 1 ? '▲' : '▼';
+          th.appendChild(arrow);
+        }
+        th.onclick = function () { sortCard(key, h); };
         thead.appendChild(th);
       });
       table.appendChild(thead);
@@ -373,7 +429,8 @@ function renderCards(data) {
         });
         table.appendChild(tr);
       });
-      card.appendChild(table);
+      scrollWrap.appendChild(table);
+      card.appendChild(scrollWrap);
     }
     container.appendChild(card);
   });
